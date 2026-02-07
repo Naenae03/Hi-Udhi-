@@ -91,7 +91,6 @@
     }
 
     .coin.dragging { opacity: 0.8; transform: scale(1.1); }
-
     .coin.inserted { animation: coinInsert 0.5s ease forwards; }
 
     @keyframes coinInsert {
@@ -247,6 +246,27 @@
       top: 50%;
       transform: translateY(-50%);
       display: none;
+      text-align: center;
+    }
+
+    .lever-prompt {
+      width: 210px;
+      background: rgba(255,255,255,0.92);
+      padding: 12px 14px;
+      border-radius: 14px;
+      font-size: 14px;
+      color: #666;
+      line-height: 1.4;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+      margin-bottom: 10px;
+      opacity: 0;
+      transform: translateY(10px) scale(0.98);
+      transition: all 0.35s ease;
+    }
+
+    .lever-prompt.show {
+      opacity: 1;
+      transform: translateY(0) scale(1);
     }
 
     .lever {
@@ -258,6 +278,7 @@
       cursor: pointer;
       transition: transform 0.2s ease;
       box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+      margin: 0 auto;
     }
 
     .lever.pulling { animation: leverPull 0.4s ease; }
@@ -342,6 +363,7 @@
     @media (max-width: 480px) {
       .vending-machine { width: 100%; max-width: 420px; }
       .lever-container { right: -30px; }
+      .lever-prompt { width: 180px; font-size: 13px; }
     }
   </style>
 </head>
@@ -364,6 +386,8 @@
     </div>
 
     <div class="lever-container" id="leverContainer">
+      <div class="lever-prompt" id="leverPrompt">Press the lever to find out the date 💘</div>
+
       <div class="lever" id="lever">
         <div class="lever-ball"></div>
       </div>
@@ -381,6 +405,7 @@
     const slotReel = document.getElementById('slotReel');
     const lever = document.getElementById('lever');
     const leverContainer = document.getElementById('leverContainer');
+    const leverPrompt = document.getElementById('leverPrompt');
     const noBtn = document.getElementById('noBtn');
 
     let isDragging = false;
@@ -461,6 +486,12 @@
       setTimeout(() => {
         coinSlotArea.style.display = 'none';
         leverContainer.style.display = 'block';
+
+        // show prompt with animation
+        setTimeout(() => {
+          leverPrompt.classList.add('show');
+        }, 150);
+
       }, 600);
     }
 
@@ -470,6 +501,9 @@
       if (currentTurn >= turns.length) return;
       lever.classList.add('pulling');
       createEmojis(2);
+
+      // hide prompt after first pull
+      leverPrompt.classList.remove('show');
 
       setTimeout(() => {
         lever.classList.remove('pulling');
