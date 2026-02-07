@@ -1,930 +1,388 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Hi!</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+<script>
+  const coin = document.getElementById('coin');
+  const coinSlot = document.getElementById('coinSlot');
+  const coinSlotArea = document.getElementById('coinSlotArea');
+  const slotReel = document.getElementById('slotReel');
+  const lever = document.getElementById('lever');
+  const leverContainer = document.getElementById('leverContainer');
+  const noBtn = document.getElementById('noBtn');
+  const finalScreen = document.getElementById('finalScreen');
+  const addToCalendarBtn = document.getElementById('addToCalendarBtn');
+  const restartBtn = document.getElementById('restartBtn');
 
-    body {
-      font-family: 'Georgia', serif;
-      background: linear-gradient(135deg, #ffd4d4 0%, #ffe4e4 100%);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-    }
+  // IMPORTANT: stop native HTML dragging interfering with our custom drag
+  coin.removeAttribute('draggable');
+  coin.addEventListener('dragstart', (e) => e.preventDefault());
 
-    .header {
-      background: linear-gradient(135deg, #d4a5a5 0%, #c99999 100%);
-      padding: 15px 40px;
-      border-radius: 15px;
-      margin-bottom: 30px;
-      box-shadow: 0 6px 20px rgba(0,0,0,0.15);
-    }
+  // Simple sound effects (tiny base64-free via WebAudio)
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const audioCtx = AudioCtx ? new AudioCtx() : null;
 
-    .header h1 {
-      color: #fff;
-      font-size: 28px;
-      letter-spacing: 3px;
-      text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
-    }
+  function beep(freq = 440, duration = 0.08, type = 'sine', gain = 0.04) {
+    if (!audioCtx) return;
+    const t0 = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t0);
+    g.gain.setValueAtTime(gain, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+    osc.connect(g);
+    g.connect(audioCtx.destination);
+    osc.start(t0);
+    osc.stop(t0 + duration);
+  }
 
-    .vending-machine {
-      width: 400px;
-      background: linear-gradient(135deg, #ffb3ba 0%, #ff9999 100%);
-      border-radius: 20px;
-      padding: 30px;
-      box-shadow: 0 15px 40px rgba(0,0,0,0.2);
-      border: 8px solid #fff;
-      position: relative;
-    }
+  function chime() {
+    beep(659, 0.06, 'sine', 0.05);
+    setTimeout(() => beep(784, 0.06, 'sine', 0.05), 70);
+    setTimeout(() => beep(988, 0.08, 'sine', 0.05), 140);
+  }
 
-    .coin-slot-area {
-      text-align: center;
-      margin-bottom: 30px;
-    }
+  function sadBuzz() {
+    beep(180, 0.12, 'square', 0.03);
+    setTimeout(() => beep(140, 0.12, 'square', 0.03), 110);
+  }
 
-    .prompt {
-      background: white;
-      padding: 15px 20px;
-      border-radius: 15px;
-      margin-bottom: 20px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-      font-size: 16px;
-      color: #666;
-      line-height: 1.5;
-    }
+  let isDragging = false;
+  let coinInserted = false;
+  let currentTurn = 0;
 
-    .coin-slot {
-      width: 120px;
-      height: 30px;
-      background: linear-gradient(135deg, #8b6f47 0%, #6b5335 100%);
-      margin: 0 auto 20px;
-      border-radius: 15px;
-      position: relative;
-      box-shadow: inset 0 3px 6px rgba(0,0,0,0.3);
-      transition: all 0.3s ease;
-    }
+  const turns = [
+    { icon: 'calendar', text: '14th February 2025' },
+    { icon: '🍽️', text: '6pm - Dinner at Cala' },
+    { icon: '🏠', text: "Followed by a show and tell at my place (Dw I'll have wine for you)" },
+    { icon: '🧱', text: 'Or a lil lego date' },
+    { icon: '🛑', text: 'You want more? greedy lil shit' },
+  ];
 
-    .coin-slot.glow {
-      box-shadow: 0 0 20px rgba(255, 215, 0, 0.6), inset 0 3px 6px rgba(0,0,0,0.3);
-    }
+  // Calendar details (for .ics)
+  const dateStart = new Date('2025-02-14T18:00:00');
+  const dateEnd = new Date('2025-02-14T21:00:00');
+  const eventTitle = "Valentine's Date 💘";
+  const eventLocation = 'Cala';
+  const eventDescription = "Dinner at 6pm, then vibes.\n\nMade with 🥰 by Anunay.";
 
-    .coin {
-      width: 60px;
-      height: 60px;
-      background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%);
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 32px;
-      cursor: grab;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-      margin: 0 auto 20px;
-      position: relative;
-      transition: transform 0.2s ease;
-      user-select: none;
-      touch-action: none;
-    }
+  // Coin drag and drop
+  coin.addEventListener('mousedown', startDrag);
+  coin.addEventListener('touchstart', startDrag, { passive: false });
+  document.addEventListener('mousemove', drag);
+  document.addEventListener('touchmove', drag, { passive: false });
+  document.addEventListener('mouseup', endDrag);
+  document.addEventListener('touchend', endDrag);
 
-    .coin:active {
-      cursor: grabbing;
-    }
+  function startDrag(e) {
+    if (coinInserted) return;
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
 
-    .coin.dragging {
-      opacity: 0.8;
-      transform: scale(1.1);
-    }
+    isDragging = true;
+    coin.classList.add('dragging');
+  }
 
-    .coin.inserted {
-      animation: coinInsert 0.5s ease forwards;
-    }
+  function drag(e) {
+    if (!isDragging || coinInserted) return;
+    e.preventDefault();
 
-    @keyframes coinInsert {
-      to {
-        transform: translateY(-100px) scale(0);
-        opacity: 0;
+    const touch = e.touches ? e.touches[0] : e;
+    const slotRect = coinSlot.getBoundingClientRect();
+
+    coin.style.position = 'fixed';
+    coin.style.left = touch.clientX - 30 + 'px';
+    coin.style.top = touch.clientY - 30 + 'px';
+
+    const distance = Math.sqrt(
+      Math.pow(touch.clientX - (slotRect.left + slotRect.width / 2), 2) +
+      Math.pow(touch.clientY - (slotRect.top + slotRect.height / 2), 2)
+    );
+
+    if (distance < 80) coinSlot.classList.add('glow');
+    else coinSlot.classList.remove('glow');
+  }
+
+  function endDrag(e) {
+    if (!isDragging || coinInserted) return;
+    isDragging = false;
+    coin.classList.remove('dragging');
+
+    const touch = e.changedTouches ? e.changedTouches[0] : e;
+    const slotRect = coinSlot.getBoundingClientRect();
+
+    const distance = Math.sqrt(
+      Math.pow(touch.clientX - (slotRect.left + slotRect.width / 2), 2) +
+      Math.pow(touch.clientY - (slotRect.top + slotRect.height / 2), 2)
+    );
+
+    if (distance < 80) insertCoin();
+    else resetCoinPosition();
+  }
+
+  function resetCoinPosition() {
+    coin.style.position = 'relative';
+    coin.style.left = '0';
+    coin.style.top = '0';
+    coinSlot.classList.remove('glow');
+  }
+
+  function insertCoin() {
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    chime();
+
+    coinInserted = true;
+    coin.classList.add('inserted');
+    coinSlot.classList.remove('glow');
+    createEmojis(3);
+
+    setTimeout(() => {
+      coinSlotArea.style.display = 'none';
+      leverContainer.style.display = 'block';
+    }, 600);
+  }
+
+  // Lever pull
+  lever.addEventListener('click', pullLever);
+
+  function pullLever() {
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    beep(220, 0.05, 'triangle', 0.04);
+
+    if (currentTurn >= turns.length) return;
+
+    lever.classList.add('pulling');
+    createEmojis(2);
+
+    setTimeout(() => {
+      lever.classList.remove('pulling');
+      spinSlot();
+    }, 200);
+  }
+
+  function spinSlot() {
+    beep(520, 0.03, 'sine', 0.02);
+
+    const symbols = ['🥰', '❤️', '💕', '💝', '💖'];
+    slotReel.classList.add('spinning');
+
+    let spinCount = 0;
+    const spinInterval = setInterval(() => {
+      slotReel.textContent = symbols[Math.floor(Math.random() * symbols.length)];
+      spinCount++;
+
+      if (spinCount > 15) {
+        clearInterval(spinInterval);
+        slotReel.classList.remove('spinning');
+        showCard();
       }
-    }
+    }, 100);
+  }
 
-    .no-button {
-      background: linear-gradient(135deg, #ff6b6b 0%, #ee5555 100%);
-      color: white;
-      padding: 12px 24px;
-      border-radius: 10px;
-      border: none;
-      font-size: 16px;
-      cursor: pointer;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.15);
-      opacity: 0.9;
-      transition: transform 0.15s ease, filter 0.15s ease;
-    }
+  function showCard() {
+    beep(880, 0.06, 'sine', 0.05);
 
-    .no-button:hover {
-      filter: brightness(1.05);
-      transform: translateY(-1px);
-    }
+    const turn = turns[currentTurn];
+    slotReel.innerHTML = '';
 
-    .no-button:active {
-      transform: translateY(1px) scale(0.99);
-    }
+    const card = document.createElement('div');
+    card.className = 'card show';
 
-    .display-window {
-      width: 100%;
-      height: 200px;
-      background: linear-gradient(135deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0.1) 100%);
-      border-radius: 15px;
-      margin-bottom: 30px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      position: relative;
-      overflow: hidden;
-      box-shadow: inset 0 4px 10px rgba(0,0,0,0.1);
-    }
-
-    /* Final screen */
-    .final-screen {
-      display: none;
-      width: 100%;
-      margin-bottom: 20px;
-    }
-
-    .final-screen.show {
-      display: block;
-      animation: cardAppear 0.35s ease forwards;
-    }
-
-    .final-card {
-      background: white;
-      border-radius: 16px;
-      padding: 20px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.18);
-      text-align: center;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .final-title {
-      font-size: 26px;
-      letter-spacing: 0.5px;
-      color: #333;
-      margin-bottom: 8px;
-    }
-
-    .final-sub {
-      font-size: 15px;
-      color: #666;
-      line-height: 1.5;
-      margin-bottom: 16px;
-    }
-
-    .final-actions {
-      display: flex;
-      gap: 10px;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-
-    button.primary,
-    button.secondary {
-      border: none;
-      padding: 12px 16px;
-      border-radius: 12px;
-      font-size: 14px;
-      cursor: pointer;
-      box-shadow: 0 6px 16px rgba(0,0,0,0.12);
-      transition: transform 0.15s ease, filter 0.15s ease;
-    }
-
-    button.primary {
-      background: linear-gradient(135deg, #ff4d6d 0%, #ff7a8a 100%);
-      color: white;
-    }
-
-    button.secondary {
-      background: linear-gradient(135deg, #f1f1f1 0%, #ffffff 100%);
-      color: #444;
-    }
-
-    button.primary:hover,
-    button.secondary:hover {
-      filter: brightness(1.03);
-      transform: translateY(-1px);
-    }
-
-    button.primary:active,
-    button.secondary:active {
-      transform: translateY(1px) scale(0.99);
-    }
-
-    .final-note {
-      margin-top: 12px;
-      font-size: 12px;
-      color: #999;
-      font-style: italic;
-    }
-
-    /* Confetti hearts */
-    .confetti {
-      position: fixed;
-      top: -20px;
-      font-size: 18px;
-      pointer-events: none;
-      animation: confettiFall 1.8s ease-in forwards;
-      z-index: 9999;
-      opacity: 0.95;
-    }
-
-    @keyframes confettiFall {
-      to {
-        transform: translateY(calc(100vh + 60px)) rotate(360deg);
-        opacity: 0;
-      }
-    }
-
-    /* Reduce motion */
-    @media (prefers-reduced-motion: reduce) {
-      .display-window::before,
-      .slot-reel.spinning,
-      .emoji-float,
-      .confetti {
-        animation: none !important;
-      }
-    }
-
-    /* Mobile */
-    
-    .display-window {
-      width: 100%;
-      height: 200px;
-      background: linear-gradient(135deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0.1) 100%);
-      border-radius: 15px;
-      margin-bottom: 30px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      position: relative;
-      overflow: hidden;
-      box-shadow: inset 0 4px 10px rgba(0,0,0,0.1);
-    }
-
-    .display-window::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: -100%;
-      width: 50%;
-      height: 100%;
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
-      animation: shine 3s infinite;
-    }
-
-    @keyframes shine {
-      0%, 100% { left: -100%; }
-      50% { left: 150%; }
-    }
-
-    .slot-reel {
-      position: absolute;
-      width: 100%;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 48px;
-    }
-
-    .slot-reel.spinning {
-      animation: spin 0.1s linear infinite;
-    }
-
-    @keyframes spin {
-      0% { transform: translateY(0); }
-      100% { transform: translateY(-60px); }
-    }
-
-    .card {
-      background: white;
-      padding: 25px;
-      border-radius: 12px;
-      box-shadow: 0 6px 15px rgba(0,0,0,0.15);
-      text-align: center;
-      max-width: 90%;
-      opacity: 0;
-      transform: scale(0.8);
-    }
-
-    .card.show {
-      animation: cardAppear 0.4s ease forwards;
-    }
-
-    @keyframes cardAppear {
-      to {
-        opacity: 1;
-        transform: scale(1);
-      }
-    }
-
-    .card.dispense {
-      animation: cardDispense 0.6s ease forwards;
-    }
-
-    @keyframes cardDispense {
-      to {
-        transform: translateY(250px);
-        opacity: 0;
-      }
-    }
-
-    .card-icon {
-      font-size: 48px;
-      margin-bottom: 15px;
-    }
-
-    .calendar {
-      width: 80px;
-      height: 80px;
-      margin: 0 auto 15px;
-      background: white;
-      border-radius: 8px;
-      box-shadow: 0 3px 8px rgba(0,0,0,0.15);
-      overflow: hidden;
-    }
-
-    .calendar-header {
-      background: linear-gradient(135deg, #ff9999 0%, #ff7777 100%);
-      color: white;
-      padding: 5px;
-      font-size: 12px;
-      font-weight: bold;
-      letter-spacing: 1px;
-    }
-
-    .calendar-date {
-      font-size: 36px;
-      font-weight: bold;
-      color: #333;
-      padding: 10px 0;
-    }
-
-    .card-text {
-      font-size: 16px;
-      color: #555;
-      line-height: 1.6;
-    }
-
-    .lever-container {
-      position: absolute;
-      right: -40px;
-      top: 50%;
-      transform: translateY(-50%);
-    }
-
-    .lever {
-      width: 30px;
-      height: 120px;
-      background: linear-gradient(135deg, #ff6666 0%, #dd4444 100%);
-      border-radius: 15px;
-      position: relative;
-      cursor: pointer;
-      transition: transform 0.2s ease;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-    }
-
-    .lever:hover {
-      filter: brightness(1.1);
-    }
-
-    .lever.pulling {
-      animation: leverPull 0.4s ease;
-    }
-
-    @keyframes leverPull {
-      0% { transform: translateY(0); }
-      50% { transform: translateY(30px); }
-      100% { transform: translateY(0); }
-    }
-
-    .lever-ball {
-      width: 40px;
-      height: 40px;
-      background: linear-gradient(135deg, #ff4444 0%, #cc3333 100%);
-      border-radius: 50%;
-      position: absolute;
-      top: -10px;
-      left: -5px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-    }
-
-    .pickup-tray {
-      width: 100%;
-      height: 60px;
-      background: linear-gradient(135deg, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.1) 100%);
-      border-radius: 10px;
-      margin-top: 20px;
-    }
-
-    .emoji-float {
-      position: fixed;
-      font-size: 32px;
-      animation: floatUp 2s ease forwards;
-      pointer-events: none;
-    }
-
-    @keyframes floatUp {
-      to {
-        transform: translateY(-100px);
-        opacity: 0;
-      }
-    }
-
-    .signature {
-      text-align: center;
-      margin-top: 30px;
-      color: #999;
-      font-size: 14px;
-      font-style: italic;
-    }
-
-    .hidden {
-      display: none;
-    }
-
-    /* Mobile */
-    @media (max-width: 480px) {
-      .vending-machine {
-        width: 100%;
-        max-width: 420px;
-      }
-
-      .lever-container {
-        right: -30px;
-      }
-    }
-  </style>
-</head>
-<body>
-  <div class="header">
-    <h1>I MADE SOMETHING</h1>
-  </div>
-
-  <div class="vending-machine">
-    <div class="coin-slot-area" id="coinSlotArea">
-      <div class="prompt">Put the coin in the slot if you'd like to go out with me on Valentine's Day.</div>
-      <div class="coin-slot" id="coinSlot"></div>
-      <div class="coin" id="coin" draggable="true">🥰</div>
-      <button class="no-button" id="noBtn">Click here if not :(</button>
-    </div>
-
-    <div class="display-window" id="displayWindow">
-      <div class="slot-reel" id="slotReel"></div>
-    </div>
-
-    <div class="final-screen" id="finalScreen" aria-live="polite">
-      <div class="final-card">
-        <div class="final-title">It’s a date 💘</div>
-        <div class="final-sub">I’ll see you on <b>14th Feb</b>. You’re stuck with me now.</div>
-
-        <div class="final-actions">
-          <button class="primary" id="addToCalendarBtn">Add to Calendar</button>
-          <button class="secondary" id="restartBtn">Replay</button>
+    if (turn.icon === 'calendar') {
+      card.innerHTML = `
+        <div class="calendar">
+          <div class="calendar-header">FEB</div>
+          <div class="calendar-date">14</div>
         </div>
-
-        <div class="final-note">(Yes, this is legally binding.)</div>
-      </div>
-    </div>
-
-    <div class="lever-container" id="leverContainer" style="display: none;">
-      <div class="lever" id="lever">
-        <div class="lever-ball"></div>
-      </div>
-    </div>
-
-    <div class="pickup-tray"></div>
-  </div>
-
-  <div class="signature">Made with 🥰 by Anunay</div>
-
-  <script>
-    const coin = document.getElementById('coin');
-    const coinSlot = document.getElementById('coinSlot');
-    const coinSlotArea = document.getElementById('coinSlotArea');
-    const slotReel = document.getElementById('slotReel');
-    const lever = document.getElementById('lever');
-    const leverContainer = document.getElementById('leverContainer');
-    const noBtn = document.getElementById('noBtn');
-    const finalScreen = document.getElementById('finalScreen');
-    const addToCalendarBtn = document.getElementById('addToCalendarBtn');
-    const restartBtn = document.getElementById('restartBtn');
-
-    // Simple sound effects (tiny base64-free via WebAudio)
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    const audioCtx = AudioCtx ? new AudioCtx() : null;
-
-    function beep(freq = 440, duration = 0.08, type = 'sine', gain = 0.04) {
-      if (!audioCtx) return;
-      const t0 = audioCtx.currentTime;
-      const osc = audioCtx.createOscillator();
-      const g = audioCtx.createGain();
-      osc.type = type;
-      osc.frequency.setValueAtTime(freq, t0);
-      g.gain.setValueAtTime(gain, t0);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
-      osc.connect(g);
-      g.connect(audioCtx.destination);
-      osc.start(t0);
-      osc.stop(t0 + duration);
+        <div class="card-text">${turn.text}</div>
+      `;
+    } else {
+      card.innerHTML = `
+        <div class="card-icon">${turn.icon}</div>
+        <div class="card-text">${turn.text}</div>
+      `;
     }
 
-    function chime() {
-      // Cute little 3-note chime
-      beep(659, 0.06, 'sine', 0.05);
-      setTimeout(() => beep(784, 0.06, 'sine', 0.05), 70);
-      setTimeout(() => beep(988, 0.08, 'sine', 0.05), 140);
-    }
+    slotReel.appendChild(card);
 
-    function sadBuzz() {
-      beep(180, 0.12, 'square', 0.03);
-      setTimeout(() => beep(140, 0.12, 'square', 0.03), 110);
-    }
-
-    let isDragging = false;
-    let coinInserted = false;
-    let currentTurn = 0;
-
-    const turns = [
-      { icon: 'calendar', text: '14th February 2025' },
-      { icon: '🍽️', text: '6pm - Dinner at Cala' },
-      { icon: '🏠', text: "Followed by a show and tell at my place (Dw I'll have wine for you)" },
-      { icon: '🧱', text: 'Or a lil lego date' },
-      { icon: '🛑', text: 'You want more? greedy lil shit' },
-    ];
-
-    // Calendar details (for .ics)
-    const dateStart = new Date('2025-02-14T18:00:00');
-    const dateEnd = new Date('2025-02-14T21:00:00');
-    const eventTitle = "Valentine's Date 💘";
-    const eventLocation = 'Cala';
-    const eventDescription = "Dinner at 6pm, then vibes.
-
-Made with 🥰 by Anunay.";
-
-    // Coin drag and drop
-    coin.addEventListener('mousedown', startDrag);
-    coin.addEventListener('touchstart', startDrag, { passive: false });
-    document.addEventListener('mousemove', drag);
-    document.addEventListener('touchmove', drag, { passive: false });
-    document.addEventListener('mouseup', endDrag);
-    document.addEventListener('touchend', endDrag);
-
-    function startDrag(e) {
-      if (coinInserted) return;
-      isDragging = true;
-      coin.classList.add('dragging');
-    }
-
-    function drag(e) {
-      if (!isDragging || coinInserted) return;
-      e.preventDefault();
-
-      const touch = e.touches ? e.touches[0] : e;
-      const slotRect = coinSlot.getBoundingClientRect();
-
-      coin.style.position = 'fixed';
-      coin.style.left = touch.clientX - 30 + 'px';
-      coin.style.top = touch.clientY - 30 + 'px';
-
-      // Check if near slot
-      const distance = Math.sqrt(
-        Math.pow(touch.clientX - (slotRect.left + slotRect.width / 2), 2) +
-          Math.pow(touch.clientY - (slotRect.top + slotRect.height / 2), 2)
-      );
-
-      if (distance < 80) {
-        coinSlot.classList.add('glow');
-      } else {
-        coinSlot.classList.remove('glow');
-      }
-    }
-
-    function endDrag(e) {
-      if (!isDragging || coinInserted) return;
-      isDragging = false;
-      coin.classList.remove('dragging');
-
-      const touch = e.changedTouches ? e.changedTouches[0] : e;
-      const slotRect = coinSlot.getBoundingClientRect();
-
-      const distance = Math.sqrt(
-        Math.pow(touch.clientX - (slotRect.left + slotRect.width / 2), 2) +
-          Math.pow(touch.clientY - (slotRect.top + slotRect.height / 2), 2)
-      );
-
-      if (distance < 80) {
-        insertCoin();
-      } else {
-        coin.style.position = 'relative';
-        coin.style.left = '0';
-        coin.style.top = '0';
-        coinSlot.classList.remove('glow');
-      }
-    }
-
-    function insertCoin() {
-      // Resume audio on first user gesture (required by most browsers)
-      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-
-      chime();) {
-      coinInserted = true;
-      coin.classList.add('inserted');
-      coinSlot.classList.remove('glow');
-      createEmojis(3);
-
+    setTimeout(() => {
+      card.classList.add('dispense');
       setTimeout(() => {
-        coinSlotArea.style.display = 'none';
-        leverContainer.style.display = 'block';
+        slotReel.innerHTML = '';
+        currentTurn++;
+
+        if (currentTurn >= turns.length) endSequence();
       }, 600);
-    }
+    }, 2500);
+  }
 
-    // Lever pull
-    lever.addEventListener('click', pullLever);
+  function endSequence() {
+    leverContainer.style.display = 'none';
+    finalScreen.classList.add('show');
 
-    function pullLever() {
-      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    heartConfetti(40);
 
-      // Lever click
-      beep(220, 0.05, 'triangle', 0.04);
-      if (currentTurn >= turns.length) return;
+    if (navigator.vibrate) navigator.vibrate([40, 40, 60]);
 
-      lever.classList.add('pulling');
-      createEmojis(2);
+    chime();
+    setTimeout(chime, 220);
+  }
 
+  function heartConfetti(count = 30) {
+    const hearts = ['💗', '💖', '💘', '💕', '❤️'];
+    for (let i = 0; i < count; i++) {
       setTimeout(() => {
-        lever.classList.remove('pulling');
-        spinSlot();
-      }, 200);
+        const el = document.createElement('div');
+        el.className = 'confetti';
+        el.textContent = hearts[Math.floor(Math.random() * hearts.length)];
+        el.style.left = Math.random() * window.innerWidth + 'px';
+        el.style.transform = `translateY(0) rotate(${Math.random() * 360}deg)`;
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), 1900);
+      }, i * 20);
     }
+  }
 
-    function spinSlot() {
-      // Spin sound
-      beep(520, 0.03, 'sine', 0.02);
-      const symbols = ['🥰', '❤️', '💕', '💝', '💖'];
-      slotReel.classList.add('spinning');
+  function createEmojis(count) {
+    beep(740, 0.02, 'sine', 0.015);
 
-      let spinCount = 0;
-      const spinInterval = setInterval(() => {
-        slotReel.textContent = symbols[Math.floor(Math.random() * symbols.length)];
-        spinCount++;
-
-        if (spinCount > 15) {
-          clearInterval(spinInterval);
-          slotReel.classList.remove('spinning');
-          showCard();
-        }
-      }, 100);
-    }
-
-    function showCard() {
-      const turn = turns[currentTurn];
-      slotReel.innerHTML = '';
-
-      const card = document.createElement('div');
-      card.className = 'card show';
-
-      if (turn.icon === 'calendar') {
-        card.innerHTML = `
-          <div class="calendar">
-            <div class="calendar-header">FEB</div>
-            <div class="calendar-date">14</div>
-          </div>
-          <div class="card-text">${turn.text}</div>
-        `;
-      } else {
-        card.innerHTML = `
-          <div class="card-icon">${turn.icon}</div>
-          <div class="card-text">${turn.text}</div>
-        `;
-      }
-
-      slotReel.appendChild(card);
-
+    for (let i = 0; i < count; i++) {
       setTimeout(() => {
-        card.classList.add('dispense');
-        setTimeout(() => {
-          slotReel.innerHTML = '';
-          currentTurn++;
+        const emoji = document.createElement('div');
+        emoji.className = 'emoji-float';
+        emoji.textContent = '🥰';
+        emoji.style.left = Math.random() * window.innerWidth + 'px';
+        emoji.style.top = window.innerHeight - 100 + 'px';
+        document.body.appendChild(emoji);
 
-          // If finished, show final screen + confetti
-          if (currentTurn >= turns.length) {
-            endSequence();
-          }
-        }, 600);
-      }, 2500);
+        setTimeout(() => emoji.remove(), 2000);
+      }, i * 200);
+    }
+  }
+
+  // Add to calendar (ICS download)
+  addToCalendarBtn.addEventListener('click', () => {
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    beep(988, 0.06, 'sine', 0.05);
+
+    const ics = buildICS();
+    const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'valentines-date.ics';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+
+  restartBtn.addEventListener('click', () => {
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    beep(440, 0.05, 'triangle', 0.04);
+
+    currentTurn = 0;
+    coinInserted = false;
+    isDragging = false;
+
+    finalScreen.classList.remove('show');
+    slotReel.innerHTML = '';
+    coinSlotArea.style.display = 'block';
+    leverContainer.style.display = 'none';
+
+    coin.classList.remove('inserted');
+    resetCoinPosition();
+
+    noClicks = 0;
+    noBtn.textContent = 'Click here if not :(';
+    noBtn.style.transform = 'translate(0, 0)';
+    coinSlot.classList.remove('glow');
+
+    heartConfetti(18);
+  });
+
+  function pad2(n) {
+    return String(n).padStart(2, '0');
+  }
+
+  function toICSDate(d) {
+    const yyyy = d.getUTCFullYear();
+    const mm = pad2(d.getUTCMonth() + 1);
+    const dd = pad2(d.getUTCDate());
+    const hh = pad2(d.getUTCHours());
+    const mi = pad2(d.getUTCMinutes());
+    const ss = pad2(d.getUTCSeconds());
+    return `${yyyy}${mm}${dd}T${hh}${mi}${ss}Z`;
+  }
+
+  function escapeICS(text) {
+    return String(text)
+      .replace(/\\/g, '\\\\')
+      .replace(/\n/g, '\\n')
+      .replace(/,/g, '\\,')
+      .replace(/;/g, '\\;');
+  }
+
+  function buildICS() {
+    const dtStamp = toICSDate(new Date());
+    const dtStart = toICSDate(dateStart);
+    const dtEnd = toICSDate(dateEnd);
+    const uid = `valentines-${Date.now()}@anunay`;
+
+    return [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Anunay//Valentine Vending Machine//EN',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      'BEGIN:VEVENT',
+      `UID:${uid}`,
+      `DTSTAMP:${dtStamp}`,
+      `DTSTART:${dtStart}`,
+      `DTEND:${dtEnd}`,
+      `SUMMARY:${escapeICS(eventTitle)}`,
+      `LOCATION:${escapeICS(eventLocation)}`,
+      `DESCRIPTION:${escapeICS(eventDescription)}`,
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+  }
+
+  // NO button: playful rejection flow
+  const noLines = [
+    "Awww okay 😭",
+    "Wait… are you sure? 🥺",
+    "Last chance… 😔",
+    "Okay I’ll stop (lying) 😤",
+    "Fine. I’ll just go cry in HD 😭📺",
+  ];
+
+  let noClicks = 0;
+
+  noBtn.addEventListener('click', () => {
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    sadBuzz();
+
+    noBtn.textContent = noLines[Math.min(noClicks, noLines.length - 1)];
+    noClicks++;
+
+    const dx = (Math.random() * 2 - 1) * 120;
+    const dy = (Math.random() * 2 - 1) * 50;
+    noBtn.style.transform = `translate(${dx}px, ${dy}px)`;
+
+    for (let i = 0; i < 2; i++) {
+      setTimeout(() => {
+        const emoji = document.createElement('div');
+        emoji.className = 'emoji-float';
+        emoji.textContent = '🥺';
+        emoji.style.left = Math.random() * window.innerWidth + 'px';
+        emoji.style.top = window.innerHeight - 100 + 'px';
+        document.body.appendChild(emoji);
+        setTimeout(() => emoji.remove(), 2000);
+      }, i * 150);
     }
 
-    function endSequence() {
-      // hide lever, show final
-      leverContainer.style.display = 'none';
-      finalScreen.classList.add('show');
-
-      // Confetti hearts
-      heartConfetti(40);
-
-      // Tiny haptic
-      if (navigator.vibrate) navigator.vibrate([40, 40, 60]);
-
-      // Big chime
-      chime();
-      setTimeout(chime, 220);
+    if (noClicks >= 4) {
+      noBtn.textContent = "Ok fine. Put the coin in 😌";
+      coinSlot.classList.add('glow');
     }
-
-    function heartConfetti(count = 30) {
-      const hearts = ['💗', '💖', '💘', '💕', '❤️'];
-      for (let i = 0; i < count; i++) {
-        setTimeout(() => {
-          const el = document.createElement('div');
-          el.className = 'confetti';
-          el.textContent = hearts[Math.floor(Math.random() * hearts.length)];
-          el.style.left = Math.random() * window.innerWidth + 'px';
-          el.style.transform = `translateY(0) rotate(${Math.random() * 360}deg)`;
-          document.body.appendChild(el);
-          setTimeout(() => el.remove(), 1900);
-        }, i * 20);
-      }
-    }
-
-    function createEmojis(count) {
-      // sprinkle
-      beep(740, 0.02, 'sine', 0.015);
-
-      for (let i = 0; i < count; i++) {
-        setTimeout(() => {
-          const emoji = document.createElement('div');
-          emoji.className = 'emoji-float';
-          emoji.textContent = '🥰';
-          emoji.style.left = Math.random() * window.innerWidth + 'px';
-          emoji.style.top = window.innerHeight - 100 + 'px';
-          document.body.appendChild(emoji);
-
-          setTimeout(() => emoji.remove(), 2000);
-        }, i * 200);
-      }
-    }
-
-    // Add to calendar (ICS download)
-    addToCalendarBtn.addEventListener('click', () => {
-      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-      beep(988, 0.06, 'sine', 0.05);
-
-      const ics = buildICS();
-      const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'valentines-date.ics';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    });
-
-    restartBtn.addEventListener('click', () => {
-      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-      beep(440, 0.05, 'triangle', 0.04);
-
-      // Reset state
-      currentTurn = 0;
-      coinInserted = false;
-      isDragging = false;
-
-      // UI reset
-      finalScreen.classList.remove('show');
-      slotReel.innerHTML = '';
-      coinSlotArea.style.display = 'block';
-      leverContainer.style.display = 'none';
-
-      // Coin reset
-      coin.classList.remove('inserted');
-      coin.style.position = 'relative';
-      coin.style.left = '0';
-      coin.style.top = '0';
-
-      // No button reset
-      noClicks = 0;
-      noBtn.textContent = 'Click here if not :(';
-      noBtn.style.transform = 'translate(0, 0)';
-      coinSlot.classList.remove('glow');
-
-      // Gentle confetti
-      heartConfetti(18);
-    });
-
-    function pad2(n) {
-      return String(n).padStart(2, '0');
-    }
-
-    function toICSDate(d) {
-      // Convert to UTC in YYYYMMDDTHHMMSSZ
-      const yyyy = d.getUTCFullYear();
-      const mm = pad2(d.getUTCMonth() + 1);
-      const dd = pad2(d.getUTCDate());
-      const hh = pad2(d.getUTCHours());
-      const mi = pad2(d.getUTCMinutes());
-      const ss = pad2(d.getUTCSeconds());
-      return `${yyyy}${mm}${dd}T${hh}${mi}${ss}Z`;
-    }
-
-    function escapeICS(text) {
-      return String(text)
-        .replace(/\/g, '\\')
-        .replace(/
-/g, '\n')
-        .replace(/,/g, '\,')
-        .replace(/;/g, '\;');
-    }
-
-    function buildICS() {
-      const dtStamp = toICSDate(new Date());
-      const dtStart = toICSDate(dateStart);
-      const dtEnd = toICSDate(dateEnd);
-      const uid = `valentines-${Date.now()}@anunay`;
-
-      return [
-        'BEGIN:VCALENDAR',
-        'VERSION:2.0',
-        'PRODID:-//Anunay//Valentine Vending Machine//EN',
-        'CALSCALE:GREGORIAN',
-        'METHOD:PUBLISH',
-        'BEGIN:VEVENT',
-        `UID:${uid}`,
-        `DTSTAMP:${dtStamp}`,
-        `DTSTART:${dtStart}`,
-        `DTEND:${dtEnd}`,
-        `SUMMARY:${escapeICS(eventTitle)}`,
-        `LOCATION:${escapeICS(eventLocation)}`,
-        `DESCRIPTION:${escapeICS(eventDescription)}`,
-        'END:VEVENT',
-        'END:VCALENDAR',
-      ].join('
-
-');
-    }
-
-    // NO button: playful rejection flow
-    const noLines = [
-      "Awww okay 😭",
-      "Wait… are you sure? 🥺",
-      "Last chance… 😔",
-      "Okay I’ll stop (lying) 😤",
-      "Fine. I’ll just go cry in HD 😭📺",
-    ];
-
-    let noClicks = 0;
-
-    noBtn.addEventListener('click', () => {
-      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-      sadBuzz();
-
-      // Change text each click
-      noBtn.textContent = noLines[Math.min(noClicks, noLines.length - 1)];
-      noClicks++;
-
-      // Make it "run away" a bit
-      const dx = (Math.random() * 2 - 1) * 120;
-      const dy = (Math.random() * 2 - 1) * 50;
-      noBtn.style.transform = `translate(${dx}px, ${dy}px)`;
-
-      // Add a couple sad emojis
-      for (let i = 0; i < 2; i++) {
-        setTimeout(() => {
-          const emoji = document.createElement('div');
-          emoji.className = 'emoji-float';
-          emoji.textContent = '🥺';
-          emoji.style.left = Math.random() * window.innerWidth + 'px';
-          emoji.style.top = window.innerHeight - 100 + 'px';
-          document.body.appendChild(emoji);
-          setTimeout(() => emoji.remove(), 2000);
-        }, i * 150);
-      }
-
-      // After a few clicks, the button gives up and highlights the coin
-      if (noClicks >= 4) {
-        noBtn.textContent = "Ok fine. Put the coin in 😌";
-        coinSlot.classList.add('glow');
-      }
-    });
-  </script>
-</body>
-</html>
+  });
+</script>
